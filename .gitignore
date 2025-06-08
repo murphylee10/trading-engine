@@ -1,0 +1,63 @@
+# === Build artifacts ===
+/build/
+/bin/
+/lib/
+
+# CMake-generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+Testing/
+
+# Compile database
+compile_commands.json
+
+# Object files and libraries
+*.o
+*.obj
+*.lo
+*.la
+*.al
+*.lai
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+*.exe
+*.out
+
+# Logs
+*.log
+
+# === IDE / Editor ===
+# Vim swap files
+*.swp
+*~
+# VSCode
+.vscode/
+/.history/
+/*.code-workspace
+# CLion / JetBrains
+.idea/
+*.iml
+# Visual Studio
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Catch2 single-header (if you vendored it)
+# tests/extern/catch.hpp
+
+# Misc
+*.zip
+*.tar.gz
