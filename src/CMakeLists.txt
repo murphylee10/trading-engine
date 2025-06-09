@@ -1,33 +1,54 @@
-# src/CMakeLists.txt
+cmake_minimum_required(VERSION 3.15)
+project(trading_engine_core LANGUAGES CXX)
+
+cmake_policy(SET CMP0167 NEW)
 find_package(Boost 1.66 REQUIRED COMPONENTS system)
 
-# 1) Core library of matching logic
+find_path(RDKAFKA_INCLUDE_DIR
+  NAMES rdkafka.h
+  HINTS /opt/homebrew/include /usr/local/include
+  PATH_SUFFIXES librdkafka
+)
+
+find_library(RDKAFKA_LIBRARY
+  NAMES rdkafka
+  HINTS /opt/homebrew/lib /usr/local/lib
+)
+
+find_library(RDKAFAKACPP_LIBRARY
+  NAMES rdkafka++
+  HINTS /opt/homebrew/lib /usr/local/lib
+)
+
+if (NOT RDKAFKA_INCLUDE_DIR OR NOT RDKAFKA_LIBRARY OR NOT RDKAFAKACPP_LIBRARY)
+  message(FATAL_ERROR "Could not find librdkafka or its C++ wrapper;\n"
+      "  Header: ${RDKAFKA_INCLUDE_DIR}\n"
+      "  C library: ${RDKAFKA_LIBRARY}\n"
+      "  C++ library: ${RDKAFAKACPP_LIBRARY}")
+endif()
+
 add_library(core
-    OrderBook.cpp
-    MatchingEngine.cpp
+  OrderBook.cpp
+  MatchingEngine.cpp
 )
 
-# Public include paths and link deps for anyone linking core
-target_include_directories(core
-  PUBLIC
-    ${Boost_INCLUDE_DIRS}            # for Boost.System / Asio
-    ${CMAKE_CURRENT_SOURCE_DIR}      # src/ (OrderBook.h, MatchingEngine.h, etc.)
-    ${CMAKE_SOURCE_DIR}/include      # concurrentqueue.h
-)
-target_link_libraries(core
-  PUBLIC
-    Boost::system
-    pthread
+target_include_directories(core PUBLIC
+  ${Boost_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/include
+  ${RDKAFKA_INCLUDE_DIR}
 )
 
-# 2) Engine executable
+target_link_libraries(core PUBLIC
+  Boost::system
+  pthread
+  ${RDKAFKA_LIBRARY}
+  ${RDKAFAKACPP_LIBRARY}
+)
+
 add_executable(engine
-    main.cpp
-    http_server.cpp
+  main.cpp
+  http_server.cpp
 )
 
-# Engine only needs to link core (which brings in its includes & libs)
-target_link_libraries(engine
-  PRIVATE
-    core
-)
+target_link_libraries(engine PRIVATE core)
