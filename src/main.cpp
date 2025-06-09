@@ -6,9 +6,12 @@
 
 #include <boost/asio.hpp>
 #include <concurrentqueue.h>
+#include <nlohmann/json.hpp>
+#include "http_server.h" 
 
 #include "Order.h"
 #include "MatchingEngine.h"
+
 
 using boost::asio::ip::tcp;
 
@@ -57,6 +60,12 @@ int main() {
                           std::ref(engine),
                           std::ref(orderLog),
                           std::ref(tradeLog));
+
+    std::thread httpThread([&](){
+        asio::io_context httpIo{1};
+        run_http_server(httpIo, 8080, engine);
+    });
+    httpThread.detach();
 
     boost::asio::io_context io_ctx;
     tcp::acceptor acceptor(io_ctx, {tcp::v4(), 9000});
@@ -133,5 +142,6 @@ int main() {
     }
 
     engThread.join();
+
     return 0;
 }

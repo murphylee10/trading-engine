@@ -17,6 +17,14 @@ public:
   double bestBid() const;
   double bestAsk() const;
 
+  // snapshot support
+  struct Level {
+    double    price;
+    uint64_t  quantity;
+  };
+  std::vector<Level> getBids(size_t depth) const; // return up to `depth` best bids (highest price first)
+  std::vector<Level> getAsks(size_t depth) const; // return up to `depth` best asks (lowest price first)
+
 private:
   // price → queue of orders
   std::map<double, std::deque<Order>, std::greater<>> bids_;

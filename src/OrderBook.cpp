@@ -142,3 +142,26 @@ std::vector<Trade> OrderBook::matchAtPrice(std::deque<Order>      &sideQueue,
 
     return trades;
 }
+
+std::vector<OrderBook::Level> OrderBook::getBids(size_t depth) const {
+    std::vector<Level> levels;
+    levels.reserve(depth);
+    for (auto it = bids_.begin(); it != bids_.end() && levels.size() < depth; ++it) {
+        uint64_t totalQty = 0;
+        for (auto &o : it->second) totalQty += o.quantity;
+        levels.push_back({ it->first, totalQty });
+    }
+    return levels;
+}
+
+std::vector<OrderBook::Level> OrderBook::getAsks(size_t depth) const {
+    std::vector<Level> levels;
+    levels.reserve(depth);
+    for (auto it = asks_.begin(); it != asks_.end() && levels.size() < depth; ++it) {
+        uint64_t totalQty = 0;
+        for (auto &o : it->second) totalQty += o.quantity;
+        levels.push_back({ it->first, totalQty });
+    }
+    return levels;
+}
+

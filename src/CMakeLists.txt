@@ -23,6 +23,7 @@ target_link_libraries(core
 # 2) Engine executable
 add_executable(engine
     main.cpp
+    http_server.cpp
 )
 
 # Engine only needs to link core (which brings in its includes & libs)
