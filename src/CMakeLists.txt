@@ -4,6 +4,9 @@ project(trading_engine_core LANGUAGES CXX)
 cmake_policy(SET CMP0167 NEW)
 find_package(Boost 1.66 REQUIRED COMPONENTS system)
 
+find_package(OpenSSL REQUIRED)
+
+
 find_path(RDKAFKA_INCLUDE_DIR
   NAMES rdkafka.h
   HINTS /opt/homebrew/include /usr/local/include
@@ -30,10 +33,16 @@ endif()
 add_library(core
   OrderBook.cpp
   MatchingEngine.cpp
+  BinanceRestAdapter.cpp
+)
+
+target_compile_definitions(core PUBLIC
+  CPPHTTPLIB_OPENSSL_SUPPORT        # Enables SSLClient in httplib.h
 )
 
 target_include_directories(core PUBLIC
   ${Boost_INCLUDE_DIRS}
+  ${OPENSSL_INCLUDE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_SOURCE_DIR}/include
   ${RDKAFKA_INCLUDE_DIR}
@@ -42,6 +51,8 @@ target_include_directories(core PUBLIC
 target_link_libraries(core PUBLIC
   Boost::system
   pthread
+  OpenSSL::SSL
+  OpenSSL::Crypto
   ${RDKAFKA_LIBRARY}
   ${RDKAFAKACPP_LIBRARY}
 )

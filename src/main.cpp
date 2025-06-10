@@ -3,6 +3,7 @@
 #include <fstream>
 #include <chrono>
 #include <sstream>
+#include <vector>
 
 #include <boost/asio.hpp>
 #include <rdkafkacpp.h>
@@ -12,6 +13,8 @@
 #include "http_server.h"
 #include "Order.h"
 #include "MatchingEngine.h"
+#include "Quote.h"
+#include "BinanceRestAdapter.h"
 
 using json = nlohmann::json;
 using tcp  = boost::asio::ip::tcp;
@@ -135,11 +138,11 @@ void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
 }
 
 int main() {
-    // In-memory handoff queue and matching engine
+    // Setup
+    moodycamel::ConcurrentQueue<Quote> quoteQueue;  // reused as orderQueue
     moodycamel::ConcurrentQueue<Order> inQ;
     MatchingEngine engine;
 
-    // Local logs
     std::ofstream orderLog("orders.log", std::ios::app);
     std::ofstream tradeLog("trades.log", std::ios::app);
 
@@ -157,25 +160,48 @@ int main() {
     delete conf;
 
     // Topics
-    auto* topicOrders  = RdKafka::Topic::create(producer, "orders",  nullptr, errstr);
-    auto* topicTrades  = RdKafka::Topic::create(producer, "trades",  nullptr, errstr);
-    auto* topicMetrics = RdKafka::Topic::create(producer, "metrics", nullptr, errstr);
+    auto* topicQuotes  = RdKafka::Topic::create(producer, "market-quotes", nullptr, errstr);
+    auto* topicOrders  = RdKafka::Topic::create(producer, "orders",        nullptr, errstr);
+    auto* topicTrades  = RdKafka::Topic::create(producer, "trades",        nullptr, errstr);
+    auto* topicMetrics = RdKafka::Topic::create(producer, "metrics",       nullptr, errstr);
 
-    // --- Launch engine thread ---
+    // --- Quote adapter: Binance REST feed ---
+    std::vector<std::string> cryptos = {"BTCUSDT","ETHUSDT"};
+    auto binAdapter = std::make_unique<BinanceRestAdapter>(cryptos, 500);
+    std::thread([&]{ binAdapter->start(quoteQueue); }).detach();
+
+    // --- Publish quotes → Kafka market-quotes ---
+    std::thread([&](){
+        Quote q;
+        while (true) {
+            if (quoteQueue.try_dequeue(q)) {
+                json je = {
+                    {"symbol",    q.symbol},
+                    {"price",     q.price},
+                    {"timestamp", q.timestamp}
+                };
+                produceJson(producer, topicQuotes, je);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    }).detach();
+
+    // --- Engine thread: orders → matching, Kafka, metrics ---
     std::thread engThread(engineLoop,
         std::ref(inQ), std::ref(engine),
         std::ref(orderLog), std::ref(tradeLog),
         producer, topicOrders, topicTrades, topicMetrics
     );
 
-    // --- Launch HTTP server ---
+    // --- HTTP server for REST snapshots ---
     std::thread httpThread([&](){
         boost::asio::io_context httpIo{1};
         run_http_server(httpIo, 8080, engine);
     });
     httpThread.detach();
 
-    // --- TCP accept loop for orders ---
+    // --- TCP accept loop for orders input ---
     boost::asio::io_context io_ctx;
     tcp::acceptor acceptor(io_ctx, tcp::endpoint(tcp::v4(), 9000));
     std::cout << "Trading engine listening on port 9000\n";
@@ -186,7 +212,6 @@ int main() {
         std::thread([sock = std::move(socket), &inQ]() mutable {
             boost::asio::streambuf buf;
             std::string line;
-
             while (true) {
                 boost::system::error_code ec;
                 auto n = boost::asio::read_until(sock, buf, '\n', ec);
