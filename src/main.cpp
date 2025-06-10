@@ -15,6 +15,7 @@
 #include "MatchingEngine.h"
 #include "Quote.h"
 #include "BinanceRestAdapter.h"
+#include "BinanceWebSocketAdapter.h"
 
 using json = nlohmann::json;
 using tcp  = boost::asio::ip::tcp;
@@ -166,9 +167,15 @@ int main() {
     auto* topicMetrics = RdKafka::Topic::create(producer, "metrics",       nullptr, errstr);
 
     // --- Quote adapter: Binance REST feed ---
-    std::vector<std::string> cryptos = {"BTCUSDT","ETHUSDT"};
-    auto binAdapter = std::make_unique<BinanceRestAdapter>(cryptos, 500);
-    std::thread([&]{ binAdapter->start(quoteQueue); }).detach();
+    // std::vector<std::string> cryptos = {"BTCUSDT","ETHUSDT"};
+    // auto binAdapter = std::make_unique<BinanceRestAdapter>(cryptos, 500);
+    // std::thread([&]{ binAdapter->start(quoteQueue); }).detach();
+
+    // --- Quote adapter: Binance WebSocket (live trades) ---
+    std::vector<std::string> cryptos = {"btcusdt","ethusdt"};  // lowercase
+    auto binWsAdapter = std::make_unique<BinanceWebSocketAdapter>(cryptos);
+    std::thread([&]{ binWsAdapter->start(quoteQueue); }).detach();
+
 
     // --- Publish quotes → Kafka market-quotes ---
     std::thread([&](){
