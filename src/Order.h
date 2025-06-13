@@ -11,7 +11,7 @@ struct Order {
     std::string symbol;
     Side       side;
     OrderType  type;
-    double     price;      // ignored for MARKET/CANCEL
+    double     price;
     uint64_t   quantity;
     uint64_t   timestamp;  // ns since epoch
 };

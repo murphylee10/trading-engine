@@ -36,7 +36,7 @@ add_library(core
 )
 
 target_compile_definitions(core PUBLIC
-  CPPHTTPLIB_OPENSSL_SUPPORT        # Enables SSLClient in httplib.h
+  CPPHTTPLIB_OPENSSL_SUPPORT
 )
 
 target_include_directories(core PUBLIC
