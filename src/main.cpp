@@ -1,27 +1,27 @@
+// src/main.cpp
+
 #include <iostream>
 #include <thread>
 #include <fstream>
 #include <chrono>
 #include <sstream>
-#include <vector>
 
 #include <boost/asio.hpp>
 #include <rdkafkacpp.h>
 #include <concurrentqueue.h>
 #include <nlohmann/json.hpp>
 
-#include "http_server.h"
 #include "Order.h"
 #include "MatchingEngine.h"
-#include "Quote.h"
-#include "BinanceRestAdapter.h"
-#include "BinanceWebSocketAdapter.h"
+#include "http_server.h"
 
 using json = nlohmann::json;
 using tcp  = boost::asio::ip::tcp;
 namespace chrono = std::chrono;
 
-// Helper to serialize and produce a JSON object to Kafka
+// ----------------------------------------------------------------------------
+// Helper: serialize a json object and publish to a Kafka topic
+// ----------------------------------------------------------------------------
 void produceJson(RdKafka::Producer* producer,
                  RdKafka::Topic*    topic,
                  const json&        j)
@@ -38,7 +38,9 @@ void produceJson(RdKafka::Producer* producer,
     producer->poll(0);
 }
 
-// Engine thread: dequeue orders, log, match, log trades, produce to Kafka topics
+// ----------------------------------------------------------------------------
+// Engine thread: consume orders, log, match, log trades, emit Kafka metrics
+// ----------------------------------------------------------------------------
 void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
                 MatchingEngine&                     engine,
                 std::ofstream&                      orderLog,
@@ -58,15 +60,16 @@ void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
             continue;
         }
 
-        // 1) Local order log
-        orderLog << o.orderId << ','
-                 << static_cast<int>(o.type) << ','
-                 << static_cast<int>(o.side) << ','
-                 << o.price << ','
-                 << o.quantity << '\n';
+        // --- 1) Local order log ---
+        orderLog 
+          << o.orderId   << ','
+          << static_cast<int>(o.type) << ','
+          << static_cast<int>(o.side) << ','
+          << o.price     << ','
+          << o.quantity  << '\n';
         orderLog.flush();
 
-        // 2) Produce order to Kafka
+        // --- 2) Publish order event to Kafka ---
         {
             json jo = {
                 {"orderId",   o.orderId},
@@ -81,25 +84,26 @@ void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
             produceJson(producer, topicOrders, jo);
         }
 
-        // 3) Measure latency and emit metric
+        // --- 3) Match & measure latency ---
         auto t0 = chrono::high_resolution_clock::now();
         auto trades = engine.onNewOrder(o);
         auto t1 = chrono::high_resolution_clock::now();
         auto latency_ns = chrono::duration_cast<chrono::nanoseconds>(t1 - t0).count();
 
+        // --- 4) Emit latency metric ---
         {
             json m = {
-                {"metric",    "order_latency_ns"},
-                {"value",     latency_ns},
-                {"symbol",    o.symbol},
+                {"metric",   "order_latency_ns"},
+                {"value",    latency_ns},
+                {"symbol",   o.symbol},
                 {"timestamp", static_cast<int64_t>(
                     chrono::duration_cast<chrono::nanoseconds>(
-                        t1.time_since_epoch()).count())}
+                      t1.time_since_epoch()).count())}
             };
             produceJson(producer, topicMetrics, m);
         }
 
-        // 4) Count orders/sec
+        // --- 5) Count orders/sec & emit when window elapses ---
         orderCount++;
         auto now = chrono::high_resolution_clock::now();
         if (now - windowStart >= chrono::seconds(1)) {
@@ -108,20 +112,21 @@ void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
                 {"value",     static_cast<int>(orderCount)},
                 {"timestamp", static_cast<int64_t>(
                     chrono::duration_cast<chrono::nanoseconds>(
-                        now.time_since_epoch()).count())}
+                      now.time_since_epoch()).count())}
             };
             produceJson(producer, topicMetrics, m);
-            orderCount   = 0;
-            windowStart  = now;
+            orderCount  = 0;
+            windowStart = now;
         }
 
-        // 5) Log & produce trades
+        // --- 6) Log & publish resulting trades ---
         for (auto& t : trades) {
-            tradeLog << t.tradeId    << ','
-                     << t.buyOrderId << ','
-                     << t.sellOrderId<< ','
-                     << t.price      << ','
-                     << t.quantity   << '\n';
+            tradeLog
+              << t.tradeId    << ','
+              << t.buyOrderId << ','
+              << t.sellOrderId<< ','
+              << t.price      << ','
+              << t.quantity   << '\n';
             tradeLog.flush();
 
             json jt = {
@@ -138,107 +143,81 @@ void engineLoop(moodycamel::ConcurrentQueue<Order>& inQ,
     }
 }
 
+// ----------------------------------------------------------------------------
+// main(): setup Kafka, engine, HTTP, and TCP ingest
+// ----------------------------------------------------------------------------
 int main() {
-    // Setup
-    moodycamel::ConcurrentQueue<Quote> quoteQueue;  // reused as orderQueue
+    // ——— Matching engine + inQ + logs ———
     moodycamel::ConcurrentQueue<Order> inQ;
     MatchingEngine engine;
-
     std::ofstream orderLog("orders.log", std::ios::app);
     std::ofstream tradeLog("trades.log", std::ios::app);
 
-    // --- Kafka producer setup ---
+    // ——— Kafka producer & topics ———
     std::string brokers = "localhost:9092";
     std::string errstr;
-    auto* conf = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
+    auto* conf     = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
     conf->set("metadata.broker.list", brokers, errstr);
 
     auto* producer = RdKafka::Producer::create(conf, errstr);
     if (!producer) {
-        std::cerr << "Kafka producer creation failed: " << errstr << "\n";
+        std::cerr << "Kafka producer error: " << errstr << "\n";
         return 1;
     }
     delete conf;
 
-    // Topics
-    auto* topicQuotes  = RdKafka::Topic::create(producer, "market-quotes", nullptr, errstr);
-    auto* topicOrders  = RdKafka::Topic::create(producer, "orders",        nullptr, errstr);
-    auto* topicTrades  = RdKafka::Topic::create(producer, "trades",        nullptr, errstr);
-    auto* topicMetrics = RdKafka::Topic::create(producer, "metrics",       nullptr, errstr);
+    auto* topicOrders  = RdKafka::Topic::create(producer, "orders",  nullptr, errstr);
+    auto* topicTrades  = RdKafka::Topic::create(producer, "trades",  nullptr, errstr);
+    auto* topicMetrics = RdKafka::Topic::create(producer, "metrics", nullptr, errstr);
 
-    // --- Quote adapter: Binance REST feed ---
-    // std::vector<std::string> cryptos = {"BTCUSDT","ETHUSDT"};
-    // auto binAdapter = std::make_unique<BinanceRestAdapter>(cryptos, 500);
-    // std::thread([&]{ binAdapter->start(quoteQueue); }).detach();
-
-    // --- Quote adapter: Binance WebSocket (live trades) ---
-    std::vector<std::string> cryptos = {"btcusdt","ethusdt"};  // lowercase
-    auto binWsAdapter = std::make_unique<BinanceWebSocketAdapter>(cryptos);
-    std::thread([&]{ binWsAdapter->start(quoteQueue); }).detach();
-
-
-    // --- Publish quotes → Kafka market-quotes ---
-    std::thread([&](){
-        Quote q;
-        while (true) {
-            if (quoteQueue.try_dequeue(q)) {
-                json je = {
-                    {"symbol",    q.symbol},
-                    {"price",     q.price},
-                    {"timestamp", q.timestamp}
-                };
-                produceJson(producer, topicQuotes, je);
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        }
-    }).detach();
-
-    // --- Engine thread: orders → matching, Kafka, metrics ---
+    // ——— Start the engine thread ———
     std::thread engThread(engineLoop,
         std::ref(inQ), std::ref(engine),
         std::ref(orderLog), std::ref(tradeLog),
         producer, topicOrders, topicTrades, topicMetrics
     );
 
-    // --- HTTP server for REST snapshots ---
+    // ——— HTTP server (REST only) ———
     std::thread httpThread([&](){
-        boost::asio::io_context httpIo{1};
-        run_http_server(httpIo, 8080, engine);
+        boost::asio::io_context ioc{1};
+        run_http_server(ioc, 8080, engine);
     });
     httpThread.detach();
 
-    // --- TCP accept loop for orders input ---
-    boost::asio::io_context io_ctx;
-    tcp::acceptor acceptor(io_ctx, tcp::endpoint(tcp::v4(), 9000));
-    std::cout << "Trading engine listening on port 9000\n";
+    // ——— TCP accept loop for inbound orders ———
+    boost::asio::io_context io_ctx{1};
+    tcp::acceptor acceptor(io_ctx, {tcp::v4(), 9000});
+    std::cout << "Matching engine listening on port 9000\n";
 
     for (;;) {
         tcp::socket socket(io_ctx);
         acceptor.accept(socket);
+
         std::thread([sock = std::move(socket), &inQ]() mutable {
             boost::asio::streambuf buf;
             std::string line;
+
             while (true) {
                 boost::system::error_code ec;
                 auto n = boost::asio::read_until(sock, buf, '\n', ec);
                 if (ec) break;
+
                 std::istream is(&buf);
                 std::getline(is, line);
                 buf.consume(n);
                 if (line.empty()) continue;
 
-                Order o;
+                // Parse CSV:
                 std::istringstream ss(line);
-                std::string token;
-                std::getline(ss, token, ','); o.orderId   = std::stoull(token);
-                std::getline(ss, token, ','); o.accountId = std::stoull(token);
-                std::getline(ss, o.symbol, ',');
-                std::getline(ss, token, ','); o.side      = static_cast<Side>(    std::stoi(token));
-                std::getline(ss, token, ','); o.type      = static_cast<OrderType>(std::stoi(token));
-                std::getline(ss, token, ','); o.price     = std::stod(token);
-                std::getline(ss, token, ','); o.quantity  = std::stoull(token);
-                std::getline(ss, token);      o.timestamp = std::stoull(token);
+                Order o; std::string tok;
+                std::getline(ss, tok, ','); o.orderId   = std::stoull(tok);
+                std::getline(ss, tok, ','); o.accountId = std::stoull(tok);
+                std::getline(ss, o.symbol,   ',');
+                std::getline(ss, tok,       ','); o.side     = static_cast<Side>(std::stoi(tok));
+                std::getline(ss, tok,       ','); o.type     = static_cast<OrderType>(std::stoi(tok));
+                std::getline(ss, tok,       ','); o.price    = std::stod(tok);
+                std::getline(ss, tok,       ','); o.quantity = std::stoull(tok);
+                std::getline(ss, tok);           o.timestamp= std::stoull(tok);
 
                 inQ.enqueue(o);
             }

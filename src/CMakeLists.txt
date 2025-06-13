@@ -33,8 +33,6 @@ endif()
 add_library(core
   OrderBook.cpp
   MatchingEngine.cpp
-  BinanceRestAdapter.cpp
-  BinanceWebSocketAdapter.cpp
 )
 
 target_compile_definitions(core PUBLIC

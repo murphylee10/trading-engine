@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Order Book & Trades</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 20px;
+      }
+      table {
+        border-collapse: collapse;
+        margin-bottom: 20px;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 4px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Trading Engine Dashboard</h1>
+    <label>
+      Symbol:
+      <select id="symbol">
+        <option>AAPL</option>
+        <option>GOOG</option>
+        <option>TSLA</option>
+      </select>
+    </label>
+    <h2>Order Book (Top 10 Bids)</h2>
+    <table id="bookTable">
+      <thead>
+        <tr>
+          <th>Price</th>
+          <th>Qty</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Recent Trades</h2>
+    <table id="tradesTable">
+      <thead>
+        <tr>
+          <th>Trade ID</th>
+          <th>Price</th>
+          <th>Qty</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <script src="main.js"></script>
+  </body>
+</html>
