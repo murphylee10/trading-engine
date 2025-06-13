@@ -9,8 +9,6 @@ A C++17 trading‐engine prototype with:
 - **Realtime metrics** (order latency & throughput) → Kafka → InfluxDB → Grafana
 - **Simple JavaScript dashboard** polling the REST API
 
----
-
 ## Features
 
 - Limit, Market & Cancel orders (price–time priority)
@@ -22,7 +20,7 @@ A C++17 trading‐engine prototype with:
 - Grafana dashboard for real-time visualization
 - Unit tests (Catch2) covering core logic
 
-## 🛠 Prerequisites
+## Prerequisites
 
 - C++17 toolchain (GCC ≥ 9 / Clang ≥ 10)
 - CMake ≥ 3.15
@@ -32,8 +30,6 @@ A C++17 trading‐engine prototype with:
 - moodycamel::ConcurrentQueue (single-header)
 - Docker & Docker Compose
 - Python 3.7+ (for metrics consumer)
-
----
 
 ### 1. System prerequisites
 
