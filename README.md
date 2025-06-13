@@ -1,14 +1,13 @@
 # Trading Engine & Metrics Pipeline
 
-A **C++17-based, high-performance matching engine** with real-time metrics streaming, REST snapshots, and observable dashboards.  
-It demonstrates:
+A C++17 trading‐engine prototype with:
 
-- Low-latency order matching in C++ with Boost.Asio
-- Decoupled streaming via Apache Kafka
-- Time-series metrics in InfluxDB and Grafana dashboards
-- Easy local deployment with Docker Compose
-- REST-style monitoring with Boost.Beast + nlohmann/json
-- Unit tests with Catch2
+- **Limit & Market orders** with price–time priority
+- **TCP ingestion** of CSV orders (`orderId,accountId,symbol,side,type,price,quantity,timestamp\n`)
+- **REST API** (Boost.Beast) for order‐book snapshots and recent trades
+- **CORS support** so any frontend can fetch `/book/{symbol}` and `/trades/{symbol}`
+- **Realtime metrics** (order latency & throughput) → Kafka → InfluxDB → Grafana
+- **Simple JavaScript dashboard** polling the REST API
 
 ---
 
@@ -36,9 +35,15 @@ It demonstrates:
 
 ---
 
-## Setup
+### 1. System prerequisites
 
-### 1. Install System Dependencies
+- **C++ toolchain**: clang-14 or gcc-9+, CMake ≥ 3.15
+- **Boost** (headers + System)
+- **librdkafka** (for Kafka C++ producer)
+- **Python 3** (for feeders & metrics bridge)
+- **Docker & docker-compose**
+
+For example, with Mac:
 
 ```bash
 brew update
@@ -49,15 +54,34 @@ brew install docker docker-compose
 
 (alternative setups for other OSes are definitely possible, but I haven't done them)
 
-### 3. Launch Docker Compose Stack
+### 2. Bring up the data platform
 
 ```bash
 docker-compose up -d
 ```
 
+This will launch:
+
+- Zookeeper @2181
+- Kafka @9092
+- InfluxDB 2.x @8086 (admin/admin, bucket=metrics, org=myorg)
+- Grafana @3000 (default admin/admin)
+
+### 3. Build & run the engine
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+./src/engine
+```
+
+- Listens for orders over TCP 9000
+- Serves REST on HTTP 8080
+
 ### 4. Build & Run
 
-```
+```bash
 mkdir -p build && cd build
 cmake ..
 make
@@ -65,47 +89,57 @@ ctest --output-on-failure
 ./src/engine
 ```
 
-### 5. Run Metrics Consumer
+### 5. Start the metrics bridge
 
-From project root (in a separate session from running engine instance):
-
-```
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install kafka-python influxdb-client
-chmod +x metrics_consumer.py
-```
-
-Here's some ways to play around with it:
-
-Send orders via netcat
+Create a virtualenv (optional):
 
 ```bash
-nc localhost 9000
-# Paste:
-1001,1,AAPL,0,0,150.0,5,1650000000000
-1002,2,AAPL,1,0,150.0,3,1650000000100
+python3 -m venv .venv
+source .venv/bin/activate
+pip install kafka-python influxdb-client
+chmod +x ../metrics_consumer.py
 ```
 
-Query REST API
+Then:
 
-```
-curl "http://localhost:8080/book/AAPL?depth=5"
-curl "http://localhost:8080/trades/AAPL?limit=10"
-```
-
-Watch Kafka topics
-
-```
-kcat -b localhost:9092 -t orders
-kcat -b localhost:9092 -t trades
-kcat -b localhost:9092 -t metrics
+```bash
+./metrics_consumer.py
 ```
 
-## Next Steps
+Consumes the Kafka metrics topic and writes into InfluxDB.
 
-- Live push via WebSockets or Server-Sent Events (SSE)
-- Multi-node scaling with Kubernetes / Helm
-- Real exchange adapters using FIX
-- Authentication & order-management UI
+### 6. Drive the engine with simulated orders
+
+a) Via nc
+
+```
+echo "1001,1,AAPL,0,0,150.00,5,1650000000000" | nc localhost 9000
+echo "1002,2,AAPL,1,0,150.00,3,1650000000100" | nc localhost 9000
+```
+
+b) Automated script
+
+```bash
+./feed_orders.py --host localhost --port 9000 \
+                 --symbols AAPL,GOOG,TSLA \
+                 --rate 5 --limit 100
+chmod +x feed_orders.py
+```
+
+Streams random orders (5 Hz, 100 total by default).
+
+### 7. Launch the dashboard
+
+Serve the web/ folder on port 8000:
+
+```bash
+cd web
+python3 -m http.server 8000
+```
+
+Open http://localhost:8000 in your browser:
+
+- Symbol dropdown (AAPL | GOOG | TSLA)
+- Order‐book snapshot (top 10 bids)
+- Recent trades (last 10)
+- Auto-refresh every 2 s
