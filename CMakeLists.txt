@@ -14,3 +14,6 @@ endif()
 add_subdirectory(src)
 enable_testing()
 add_subdirectory(tests)
+
+add_executable(benchmark src/benchmark.cpp)
+target_link_libraries(benchmark PRIVATE core)
